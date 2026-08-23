@@ -212,12 +212,14 @@
     margin-top: -10px;
     margin-bottom: 16px;
   }
-  .line-status {
+  .saved-confirm {
     font-size: 0.75rem;
-    color: var(--muted);
-    margin-bottom: 8px;
+    color: #3ecf6b;
+    margin-top: -10px;
+    margin-bottom: 16px;
+    display: none;
   }
-  .line-status .bad { color: var(--accent2); }
+  .saved-confirm.show { display: block; }
 </style>
 </head>
 <body>
@@ -228,11 +230,12 @@
   <div class="card">
     <div id="pwSetupSection">
       <label for="passwordInput">Password (key)</label>
-      <input type="password" id="passwordInput" placeholder="Your secret password" autocomplete="off">
+      <input type="password" id="passwordInput" placeholder="Your secret password" autocomplete="off" onblur="tryPersistPasswordNow()">
       <div class="pw-row">
-        <input type="checkbox" id="rememberCheckbox" checked>
+        <input type="checkbox" id="rememberCheckbox" checked onchange="tryPersistPasswordNow()">
         <label for="rememberCheckbox">Remember password on this device</label>
       </div>
+      <div class="saved-confirm" id="savedConfirm">✓ Password saved on this device</div>
     </div>
 
     <div id="pwLockedSection" style="display:none;">
@@ -284,6 +287,14 @@
 <script>
 const STORAGE_KEY = 'numScramblerPassword';
 let currentMode = 'single';
+let storageAvailable = true;
+
+try {
+  localStorage.setItem('__storage_test__', '1');
+  localStorage.removeItem('__storage_test__');
+} catch (e) {
+  storageAvailable = false;
+}
 
 function setMode(mode) {
   currentMode = mode;
@@ -296,14 +307,22 @@ function setMode(mode) {
 }
 
 function loadSavedPassword() {
+  if (!storageAvailable) return null;
   return localStorage.getItem(STORAGE_KEY);
 }
 
 function savePassword(pw) {
-  localStorage.setItem(STORAGE_KEY, pw);
+  if (!storageAvailable) return false;
+  try {
+    localStorage.setItem(STORAGE_KEY, pw);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function clearSavedPassword() {
+  if (!storageAvailable) return;
   localStorage.removeItem(STORAGE_KEY);
 }
 
@@ -322,7 +341,37 @@ function forgetPassword() {
   clearSavedPassword();
   document.getElementById('passwordInput').value = '';
   document.getElementById('rememberCheckbox').checked = true;
+  document.getElementById('savedConfirm').classList.remove('show');
   initPasswordUI();
+}
+
+function tryPersistPasswordNow() {
+  const typed = document.getElementById('passwordInput').value;
+  const remember = document.getElementById('rememberCheckbox').checked;
+  const confirmEl = document.getElementById('savedConfirm');
+
+  if (!typed || !remember) {
+    confirmEl.classList.remove('show');
+    return;
+  }
+
+  if (!storageAvailable) {
+    showError('This browser is blocking local storage (private/incognito mode, or storage disabled). "Remember password" cannot work here — try a normal browsing tab, or use the password field each time.');
+    confirmEl.classList.remove('show');
+    return;
+  }
+
+  const ok = savePassword(typed);
+  const verify = loadSavedPassword();
+
+  if (ok && verify === typed) {
+    clearError();
+    confirmEl.classList.add('show');
+    initPasswordUI();
+  } else {
+    showError('Could not save the password on this device. Storage may be full, blocked, or restricted by browser settings.');
+    confirmEl.classList.remove('show');
+  }
 }
 
 function getActivePassword() {
