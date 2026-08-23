@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Number Scrambler</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d29;
+    --accent: #4f8cff;
+    --accent2: #ff6b6b;
+    --text: #e8eaf0;
+    --muted: #8b8fa3;
+    --border: #2a2e3d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px;
+  }
+  .container { width: 100%; max-width: 480px; }
+  h1 {
+    font-size: 1.4rem;
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  input {
+    width: 100%;
+    padding: 14px;
+    font-size: 1.1rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #0f1117;
+    color: var(--text);
+    margin-bottom: 16px;
+    font-family: 'SF Mono', Consolas, monospace;
+  }
+  input:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  .btn-row { display: flex; gap: 10px; }
+  button {
+    flex: 1;
+    padding: 14px;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:active { opacity: 0.7; }
+  .btn-scramble { background: var(--accent); color: white; }
+  .btn-unscramble { background: var(--accent2); color: white; }
+  .result-box {
+    margin-top: 16px;
+    padding: 16px;
+    background: #0f1117;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    display: none;
+  }
+  .result-box.show { display: block; }
+  .result-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+  .result-value {
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 1.6rem;
+    font-weight: 700;
+    word-break: break-all;
+    color: var(--accent);
+  }
+  .copy-btn {
+    margin-top: 10px;
+    background: var(--border);
+    color: var(--text);
+    padding: 8px;
+    font-size: 0.85rem;
+  }
+  .info {
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.5;
+    padding: 0 4px;
+  }
+  .info strong { color: var(--text); }
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--card);
+    border: 1px solid var(--accent);
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  .error { color: var(--accent2); font-size: 0.85rem; margin-top: 8px; display: none; }
+  .error.show { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔐 Number Scrambler</h1>
+  <div class="subtitle">Password-based reversible number anonymisation</div>
+
+  <div class="card">
+    <label for="numberInput">Number</label>
+    <input type="text" id="numberInput" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 1234567890" autocomplete="off">
+
+    <label for="passwordInput">Password (key)</label>
+    <input type="password" id="passwordInput" placeholder="Your secret password" autocomplete="off">
+
+    <div class="btn-row">
+      <button class="btn-scramble" onclick="handleScramble()">Scramble →</button>
+      <button class="btn-unscramble" onclick="handleUnscramble()">← Unscramble</button>
+    </div>
+
+    <div class="error" id="errorMsg"></div>
+
+    <div class="result-box" id="resultBox">
+      <div class="result-label" id="resultLabel">Result</div>
+      <div class="result-value" id="resultValue"></div>
+      <button class="copy-btn" onclick="copyResult()">📋 Copy to clipboard</button>
+    </div>
+  </div>
+
+  <div class="card info">
+    <strong>How it works:</strong> This uses a keyed Feistel cipher (SHA-256 based, similar in spirit to NIST's FF1 format-preserving encryption) to transform your number into another number of the <strong>same length</strong>, deterministically, based on your password.
+    <br><br>
+    Same number + same password → same scrambled output, every time. Enter the scrambled number with the same password to get the original back. No data is sent anywhere — everything runs locally in your browser.
+    <br><br>
+    <strong>Important:</strong> if you forget the password, the number cannot be recovered. Use at least 4 digits for reliable results. Save this page to your home screen for quick access.
+  </div>
+</div>
+
+<div class="toast" id="toast">Copied!</div>
+
+<script>
+async function sha256Hex(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBigInt(hex) {
+  return BigInt('0x' + hex);
+}
+
+async function roundFunction(key, roundNum, half, outLen) {
+  const data = `${key}:${roundNum}:${half}`;
+  const hex = await sha256Hex(data);
+  const val = hexToBigInt(hex);
+  const modulus = 10n ** BigInt(outLen);
+  return val % modulus;
+}
+
+function padZero(numStr, len) {
+  return numStr.padStart(len, '0');
+}
+
+async function feistelEncrypt(numberStr, key, rounds = 8) {
+  const n = numberStr.length;
+  const leftLen = Math.floor(n / 2);
+  let L = numberStr.slice(0, leftLen);
+  let R = numberStr.slice(leftLen);
+
+  for (let i = 0; i < rounds; i++) {
+    const Llen = L.length;
+    const fOut = await roundFunction(key, i, R, Llen);
+    const newRVal = (BigInt(L) + fOut) % (10n ** BigInt(Llen));
+    const newR = padZero(newRVal.toString(), Llen);
+    const oldR = R;
+    R = newR;
+    const temp = L;
+    L = oldR;
+    R = newR;
+  }
+  return L + R;
+}
+
+async function feistelDecrypt(numberStr, key, rounds = 8) {
+  const n = numberStr.length;
+  const leftLen = Math.floor(n / 2);
+  const rightLen = n - leftLen;
+
+  let lens = [[leftLen, rightLen]];
+  let Ll = leftLen, Rl = rightLen;
+  for (let i = 0; i < rounds; i++) {
+    [Ll, Rl] = [Rl, Ll];
+    lens.push([Ll, Rl]);
+  }
+
+  const [finalLLen, finalRLen] = lens[rounds];
+  let L = numberStr.slice(0, finalLLen);
+  let R = numberStr.slice(finalLLen);
+
+  for (let i = rounds - 1; i >= 0; i--) {
+    const [prevLLen, prevRLen] = lens[i];
+    const fOut = await roundFunction(key, i, L, prevLLen);
+    const modulus = 10n ** BigInt(prevLLen);
+    let origLVal = (BigInt(R) - fOut) % modulus;
+    if (origLVal < 0n) origLVal += modulus;
+    const origL = padZero(origLVal.toString(), prevLLen);
+    const oldL = L;
+    L = origL;
+    R = oldL;
+  }
+  return L + R;
+}
+
+function showError(msg) {
+  const errEl = document.getElementById('errorMsg');
+  errEl.textContent = msg;
+  errEl.classList.add('show');
+  document.getElementById('resultBox').classList.remove('show');
+}
+
+function clearError() {
+  document.getElementById('errorMsg').classList.remove('show');
+}
+
+function validateInputs() {
+  const number = document.getElementById('numberInput').value.trim();
+  const password = document.getElementById('passwordInput').value;
+
+  if (!number || !/^[0-9]+$/.test(number)) {
+    showError('Please enter a valid number (digits only).');
+    return null;
+  }
+  if (number.length < 2) {
+    showError('Number must be at least 2 digits.');
+    return null;
+  }
+  if (!password) {
+    showError('Please enter a password.');
+    return null;
+  }
+  clearError();
+  return { number, password };
+}
+
+async function handleScramble() {
+  const inputs = validateInputs();
+  if (!inputs) return;
+  const result = await feistelEncrypt(inputs.number, inputs.password);
+  displayResult('Scrambled result', result);
+}
+
+async function handleUnscramble() {
+  const inputs = validateInputs();
+  if (!inputs) return;
+  const result = await feistelDecrypt(inputs.number, inputs.password);
+  displayResult('Unscrambled (original) result', result);
+}
+
+function displayResult(label, value) {
+  document.getElementById('resultLabel').textContent = label;
+  document.getElementById('resultValue').textContent = value;
+  document.getElementById('resultBox').classList.add('show');
+}
+
+function copyResult() {
+  const val = document.getElementById('resultValue').textContent;
+  navigator.clipboard.writeText(val).then(() => {
+    const toast = document.getElementById('toast');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1500);
+  });
+}
+</script>
+</body>
+</html>
