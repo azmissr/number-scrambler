@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ID Scrambler">
+<meta name="apple-mobile-web-app-title" content="IDS">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0f1117">
 <link rel="apple-touch-icon" href="icon.png">
@@ -62,7 +62,7 @@
     margin-bottom: 6px;
     font-weight: 600;
   }
-  input {
+  input, textarea {
     width: 100%;
     padding: 14px;
     font-size: 1.1rem;
@@ -74,7 +74,13 @@
     font-family: 'SF Mono', Consolas, monospace;
     -webkit-appearance: none;
   }
-  input:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  textarea {
+    resize: vertical;
+    min-height: 120px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
   .btn-row { display: flex; gap: 10px; }
   button {
     flex: 1;
@@ -112,6 +118,12 @@
     font-weight: 700;
     word-break: break-all;
     color: var(--accent);
+  }
+  .result-value.multiline {
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1.6;
+    white-space: pre-wrap;
   }
   .copy-btn {
     margin-top: 10px;
@@ -174,6 +186,38 @@
     padding: 0;
     flex: none;
   }
+  .mode-toggle {
+    display: flex;
+    background: #0f1117;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 20px;
+  }
+  .mode-toggle button {
+    background: transparent;
+    color: var(--muted);
+    padding: 10px;
+    font-size: 0.9rem;
+    border-radius: 7px;
+  }
+  .mode-toggle button.active {
+    background: var(--card);
+    color: var(--text);
+  }
+  .mode-toggle button:active { opacity: 1; }
+  .hint {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: -10px;
+    margin-bottom: 16px;
+  }
+  .line-status {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .line-status .bad { color: var(--accent2); }
 </style>
 </head>
 <body>
@@ -198,8 +242,21 @@
       </div>
     </div>
 
-    <label for="numberInput">Number</label>
-    <input type="text" id="numberInput" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 1234567890" autocomplete="off">
+    <div class="mode-toggle">
+      <button id="singleModeBtn" class="active" onclick="setMode('single')">Single</button>
+      <button id="batchModeBtn" onclick="setMode('batch')">Batch</button>
+    </div>
+
+    <div id="singleModeSection">
+      <label for="numberInput">Number</label>
+      <input type="text" id="numberInput" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 1234567890" autocomplete="off">
+    </div>
+
+    <div id="batchModeSection" style="display:none;">
+      <label for="batchInput">Numbers (one per line)</label>
+      <textarea id="batchInput" placeholder="1234567890&#10;9876543210&#10;5551234567"></textarea>
+      <div class="hint">Paste a list of numbers, one per line. Blank lines are ignored.</div>
+    </div>
 
     <div class="btn-row">
       <button class="btn-scramble" onclick="handleScramble()">Scramble →</button>
@@ -226,6 +283,17 @@
 
 <script>
 const STORAGE_KEY = 'numScramblerPassword';
+let currentMode = 'single';
+
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('singleModeBtn').classList.toggle('active', mode === 'single');
+  document.getElementById('batchModeBtn').classList.toggle('active', mode === 'batch');
+  document.getElementById('singleModeSection').style.display = mode === 'single' ? 'block' : 'none';
+  document.getElementById('batchModeSection').style.display = mode === 'batch' ? 'block' : 'none';
+  clearError();
+  document.getElementById('resultBox').classList.remove('show');
+}
 
 function loadSavedPassword() {
   return localStorage.getItem(STORAGE_KEY);
@@ -352,43 +420,82 @@ function clearError() {
   document.getElementById('errorMsg').classList.remove('show');
 }
 
-function validateInputs() {
-  const number = document.getElementById('numberInput').value.trim();
+function getPasswordOrError() {
   const password = getActivePassword();
-
-  if (!number || !/^[0-9]+$/.test(number)) {
-    showError('Please enter a valid number (digits only).');
-    return null;
-  }
-  if (number.length < 2) {
-    showError('Number must be at least 2 digits.');
-    return null;
-  }
   if (!password) {
     showError('Please enter a password.');
     return null;
   }
-  clearError();
-  return { number, password };
+  return password;
+}
+
+function validateSingleNumber(number) {
+  if (!number || !/^[0-9]+$/.test(number)) return false;
+  if (number.length < 2) return false;
+  return true;
 }
 
 async function handleScramble() {
-  const inputs = validateInputs();
-  if (!inputs) return;
-  const result = await feistelEncrypt(inputs.number, inputs.password);
-  displayResult('Scrambled result', result);
+  if (currentMode === 'single') {
+    await runSingle(feistelEncrypt, 'Scrambled result');
+  } else {
+    await runBatch(feistelEncrypt, 'Scrambled results');
+  }
 }
 
 async function handleUnscramble() {
-  const inputs = validateInputs();
-  if (!inputs) return;
-  const result = await feistelDecrypt(inputs.number, inputs.password);
-  displayResult('Unscrambled (original) result', result);
+  if (currentMode === 'single') {
+    await runSingle(feistelDecrypt, 'Unscrambled (original) result');
+  } else {
+    await runBatch(feistelDecrypt, 'Unscrambled (original) results');
+  }
 }
 
-function displayResult(label, value) {
+async function runSingle(fn, label) {
+  const number = document.getElementById('numberInput').value.trim();
+  const password = getPasswordOrError();
+  if (!password) return;
+
+  if (!validateSingleNumber(number)) {
+    showError('Please enter a valid number (digits only, at least 2 digits).');
+    return;
+  }
+  clearError();
+  const result = await fn(number, password);
+  displayResult(label, result, false);
+}
+
+async function runBatch(fn, label) {
+  const raw = document.getElementById('batchInput').value;
+  const password = getPasswordOrError();
+  if (!password) return;
+
+  const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length === 0) {
+    showError('Please enter at least one number, one per line.');
+    return;
+  }
+
+  const invalidLines = lines.filter(l => !validateSingleNumber(l));
+  if (invalidLines.length > 0) {
+    showError(`Invalid entries found (digits only, min 2 digits): ${invalidLines.slice(0, 3).join(', ')}${invalidLines.length > 3 ? '…' : ''}`);
+    return;
+  }
+
+  clearError();
+  const results = [];
+  for (const line of lines) {
+    const r = await fn(line, password);
+    results.push(r);
+  }
+  displayResult(label, results.join('\n'), true);
+}
+
+function displayResult(label, value, isMultiline) {
   document.getElementById('resultLabel').textContent = label;
-  document.getElementById('resultValue').textContent = value;
+  const valueEl = document.getElementById('resultValue');
+  valueEl.textContent = value;
+  valueEl.classList.toggle('multiline', isMultiline);
   document.getElementById('resultBox').classList.add('show');
 }
 
